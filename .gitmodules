@@ -1,0 +1,3 @@
+[submodule "gym-2048"]
+	path = gym-2048
+	url = https://github.com/mllobet/gym-2048.git
