@@ -13,19 +13,18 @@ import gym
 import replayMemory
 
 # MAKE ENVIRONMENT
-env=gym.make('CartPole-v0')
+env=gym.make('MountainCar-v0')
 
 # CONSTANTS
-LOGS_PATH="/tmp/simple_logs/"
+LOGS_PATH="/tmp/mountain_logs/"
 STATE_SIZE=env.observation_space.shape[0]
 ACTION_RANGE=env.action_space.shape[0]
 ACTION_SIZE=1
-LEARNING_RATE=1e-3
-EPSILON=0.2
-TAU=1e-3
-NUM_EPISODES=14000
-MINIBATCH_SIZE=1024
-MEMORY_MAX_SIZE=int(1e7)
+LEARNING_RATE=1e-5
+EPSILON=0.4
+NUM_EPISODES=5000
+MINIBATCH_SIZE=64
+MEMORY_MAX_SIZE=int(1e5)
 DISCOUNT_FACTOR=0.99
 INDEX_STATE=0
 INDEX_REWARD=1
@@ -37,7 +36,6 @@ VAR_SIZE_DIC={INDEX_STATE:STATE_SIZE,
               INDEX_DONE:1,
               INDEX_LAST_STATE:STATE_SIZE,
               INDEX_ACTION:ACTION_SIZE}
-LEARNING_HAS_STARTED=False
 
 replayMemory=replayMemory.replayMemory(MINIBATCH_SIZE,MEMORY_MAX_SIZE,VAR_SIZE_DIC)
 
@@ -46,31 +44,15 @@ sess=tf.Session()
 
 # Make network
 state_input_tensor=tf.placeholder(tf.float32,shape=(None,STATE_SIZE),name="state_input_tensor")
-target_Q_tensor=tf.stop_gradient(tf.placeholder(tf.float32,shape=(None,ACTION_RANGE),name="target_Q_input_tensor"))
+target_Q_tensor=tf.placeholder(tf.float32,shape=(None,ACTION_RANGE),name="state_input_tensor")
 
-with tf.variable_scope("critic"):
-    h1=tf.layers.dense(state_input_tensor,32,activation=tf.nn.relu,name="hidden_layer_1",reuse=False)
-    h2=tf.layers.dense(h1,32,activation=tf.nn.relu,name="hidden_layer_2",reuse=False)
-    h3=tf.layers.dense(h2,32,activation=tf.nn.relu,name="hidden_layer_3",reuse=False)
-    output=tf.layers.dense(h3,ACTION_RANGE,activation=None,name="output_layer",reuse=False)
+h1=tf.layers.dense(state_input_tensor,32,activation=tf.nn.relu,name="hidden_layer_1",reuse=False)
+h2=tf.layers.dense(h1,32,activation=tf.nn.relu,name="hidden_layer_2",reuse=False)
+h3=tf.layers.dense(h2,32,activation=tf.nn.relu,name="hidden_layer_3",reuse=False)
+output=tf.layers.dense(h3,ACTION_RANGE,activation=None,name="output_layer",reuse=False)
 
 loss=tf.reduce_mean(tf.square(output-target_Q_tensor),name="loss")
-train=tf.train.AdamOptimizer(LEARNING_RATE).minimize(loss)    
-
-with tf.variable_scope("target_critic"):
-    h1_target=tf.layers.dense(state_input_tensor,32,activation=tf.nn.relu,name="hidden_layer_1",reuse=False)
-    h2_target=tf.layers.dense(h1_target,32,activation=tf.nn.relu,name="hidden_layer_2",reuse=False)
-    h3_target=tf.layers.dense(h2_target,32,activation=tf.nn.relu,name="hidden_layer_3",reuse=False)
-    output_target=tf.layers.dense(h3_target,ACTION_RANGE,activation=None,name="output_layer",reuse=False)
-
-critic_weights=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=("critic"))
-target_critic_weights=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=("target_critic"))
-
-update_target_ops=[]
-with tf.variable_scope("TARGET_UPDATE"):
-    for i in range(len(critic_weights)):
-        update_target_op=target_critic_weights[i].assign(TAU*critic_weights[i]+(1-TAU)*target_critic_weights[i])
-        update_target_ops.append(update_target_op)
+train=tf.train.AdamOptimizer(LEARNING_RATE).minimize(loss)
 
 summaryMerged=tf.summary.merge_all()
 
@@ -84,11 +66,6 @@ init_op=tf.global_variables_initializer()
 tf.get_default_graph().finalize()
 sess.run(init_op)
 
-TAU=1
-sess.run(update_target_ops)
-TAU=1e-5
-
-
 for episode in range(NUM_EPISODES):
     if episode%100==0:
         print "Episode",episode,"of",NUM_EPISODES
@@ -101,7 +78,7 @@ for episode in range(NUM_EPISODES):
     while not done:
         # Select action
         if np.random.random()<EPSILON:
-            action=np.random.randint(0,2)
+            action=np.random.randint(0,ACTION_RANGE)
         else:
             Qs=sess.run(output,feed_dict={state_input_tensor:state})
             action=np.argmax(Qs)
@@ -113,26 +90,19 @@ for episode in range(NUM_EPISODES):
         state=new_state
         epoch+=1
         acc_reward+=reward
-        if episode>500:
-            if not LEARNING_HAS_STARTED:
-                LEARNING_HAS_STARTED=True
-                print "Warmup phase over, started learning!"
-            # Sample minibatch
+        if episode>100:
             minibatch=replayMemory.get_batch()
             S=replayMemory.get_from_minibatch(minibatch,INDEX_STATE)
             St0=replayMemory.get_from_minibatch(minibatch,INDEX_LAST_STATE)
             A=replayMemory.get_from_minibatch(minibatch,INDEX_ACTION)
             D=replayMemory.get_from_minibatch(minibatch,INDEX_DONE)
             R=replayMemory.get_from_minibatch(minibatch,INDEX_REWARD)
-            # Create targets
-            next_states_Q=R+DISCOUNT_FACTOR*np.reshape(np.max(sess.run(output_target,feed_dict={state_input_tensor:S}),axis=-1),(MINIBATCH_SIZE,1))*(1-D)
+            #TODO add target network
+            next_states_Q=R+DISCOUNT_FACTOR*np.reshape(np.max(sess.run(output,feed_dict={state_input_tensor:S}),axis=-1),(MINIBATCH_SIZE,1))*(1-D)
             target_Q=sess.run(output,feed_dict={state_input_tensor:St0})
             target_Q[np.arange(MINIBATCH_SIZE),A.flatten()]=np.transpose(next_states_Q)
-            # Train network
             my_loss+=sess.run(loss,feed_dict={state_input_tensor:St0,target_Q_tensor:target_Q})
             sess.run(train,feed_dict={state_input_tensor:St0,target_Q_tensor:target_Q})
-            # Update target network
-            sess.run(update_target_ops)
             if done:
                 mean_reward=float(acc_reward)
                 sumOut=sess.run(re_sum,feed_dict={reward_summary:mean_reward})
