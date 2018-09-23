@@ -19,14 +19,15 @@ env=gym.make('game-2048-v0')
 
 # CONSTANTS
 LOGS_PATH="/tmp/2048_logs/"
+SAVE_PATH="/tmp/ddqn_weights/"
 STATE_SIZE=16
 ACTION_RANGE=env.action_space.shape[0]
 ACTION_SIZE=1
 LEARNING_RATE=1e-4
 EPSILON=0.2
 TAU=1e-4
-NUM_EPISODES=14000
-MINIBATCH_SIZE=64
+NUM_EPISODES=100000
+MINIBATCH_SIZE=256
 MEMORY_MAX_SIZE=int(1e5)
 DISCOUNT_FACTOR=0.99
 INDEX_STATE=0
@@ -80,7 +81,7 @@ writer=tf.summary.FileWriter(LOGS_PATH,sess.graph)
 loss_summary=tf.placeholder('float',name='Critic_loss_value')
 reward_summary=tf.placeholder('float',name='Reward_value')
 Q_summary=tf.placeholder('float',name='Q_value')
-epoch_summary=tf.placeholder('float',name='epochs per episode')
+epoch_summary=tf.placeholder('float',name='epochs_per_episode')
 loss_sum=tf.summary.scalar("Critic_loss", loss_summary)
 re_sum=tf.summary.scalar("reward", reward_summary)
 Q_sum=tf.summary.scalar("Q values",Q_summary)
@@ -114,6 +115,7 @@ for episode in range(NUM_EPISODES):
     my_loss=0
     epoch=0
     acc_reward=0
+    acc_Q=0
     while not done:
         no_change=True
         no_change2=False
@@ -150,6 +152,7 @@ for episode in range(NUM_EPISODES):
             next_states_Q=R+DISCOUNT_FACTOR*np.reshape(np.max(sess.run(output_target,feed_dict={state_input_tensor:S}),axis=-1),(MINIBATCH_SIZE,1))*(1-D)
             target_Q=sess.run(output,feed_dict={state_input_tensor:St0})
             target_Q[np.arange(MINIBATCH_SIZE),A.flatten()]=np.transpose(next_states_Q)
+            acc_Q+=np.mean(np.amax(target_Q,axis=1))
             # Train network
             my_loss+=sess.run(loss,feed_dict={state_input_tensor:St0,target_Q_tensor:target_Q})
             sess.run(train,feed_dict={state_input_tensor:St0,target_Q_tensor:target_Q})
@@ -173,6 +176,9 @@ for episode in range(NUM_EPISODES):
                 # record epoch
                 summary_epoch=sess.run(epoch_sum,feed_dict={epoch_summary:epoch})
                 writer.add_summary(summary_epoch,episode)
+                if episode%1000==0:
+                    saver.save(sess,SAVE_PATH)
+                    print "Model saved in path: ",SAVE_PATH
 done=False
 for example in range(20):
     state=preprocess_state(env.reset())
